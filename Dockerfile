@@ -13,8 +13,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 COPY requirements-mock.txt requirements-production.txt ./
-RUN python3 -m pip install --index-url https://download.pytorch.org/whl/cu128 torch \
-    && python3 -m pip install -r requirements-production.txt
+RUN python3 -m pip install --upgrade pip setuptools wheel \
+    && python3 -m pip install --index-url https://download.pytorch.org/whl/cu128 torch==2.11.0 \
+    && python3 -m pip install -r requirements-production.txt \
+    && python3 -m pip check
 COPY h3_worker ./h3_worker
 COPY handler.py .
 

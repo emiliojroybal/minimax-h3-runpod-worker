@@ -1,0 +1,6 @@
+runpod==1.11.0
+pydantic==2.13.4
+httpx==0.28.1
+boto3==1.43.53
+Pillow==11.3.0
+av==15.0.0

@@ -1,0 +1,18 @@
+FROM python:3.12-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    H3_INFERENCE_MODE=mock
+
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY requirements-mock.txt .
+RUN pip install --no-cache-dir -r requirements-mock.txt
+COPY h3_worker ./h3_worker
+COPY handler.py .
+COPY local_server.py .
+
+EXPOSE 8000
+CMD ["python", "-u", "local_server.py"]

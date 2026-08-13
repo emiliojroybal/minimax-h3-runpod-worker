@@ -1,0 +1,7 @@
+-r requirements-mock.txt
+accelerate>=1.10,<2
+safetensors>=0.6,<1
+transformers>=4.57,<5
+torchao>=0.13,<1
+# Exact official-main revision containing the H3 ModularPipeline integration.
+git+https://github.com/huggingface/diffusers.git@788e80206a9722b133fc4907bbb8da2ba26d5181

@@ -7,7 +7,7 @@ from threading import Lock
 from .base import GenerationAdapter
 from ..config import settings
 from ..media import LocalReference
-from ..model_cache import missing_components, resolve_model_snapshot
+from ..model_cache import missing_components, required_components, resolve_model_snapshot
 from ..schemas import GenerationInput
 from ..utils import aspect_dimensions, h3_num_frames
 
@@ -77,7 +77,28 @@ class DiffusersH3Adapter(GenerationAdapter):
                 cache_dir=str(settings.hub_cache),
             )
             print(f"[h3] pipeline configuration ready for {mode}; loading components", flush=True)
-            pipeline.load_components(dtype=torch.bfloat16)
+            load_kwargs: dict[str, object] = {
+                "dtype": torch.bfloat16,
+                "cache_dir": str(settings.hub_cache),
+            }
+            if snapshot is not None:
+                # Component specs in the modular index retain the Hub repository ID.
+                # Override it so a production worker uses only its prepared volume.
+                load_kwargs.update(
+                    pretrained_model_name_or_path=str(snapshot),
+                    local_files_only=True,
+                )
+            pipeline.load_components(**load_kwargs)
+
+            unloaded = [
+                name for name in required_components(mode) if getattr(pipeline, name, None) is None
+            ]
+            if unloaded:
+                raise RuntimeError(
+                    f"Diffusers failed to load required H3 components for {mode}: {', '.join(unloaded)}. "
+                    "Check the component-load error immediately above; the worker image may be missing "
+                    "a required runtime dependency."
+                )
             self._pipelines[mode] = pipeline
             print(f"[h3] {mode} components ready in {time.monotonic() - started:.1f}s", flush=True)
             return pipeline

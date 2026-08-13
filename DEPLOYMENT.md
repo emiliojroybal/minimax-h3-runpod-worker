@@ -103,6 +103,8 @@ Send this async request to each endpoint:
 
 The response should report `model_cache.ready: true` and list the endpoint's enabled modes. This health request does not load model weights into memory. The first actual generation will still take several minutes to load the pre-cached weights from the volume, but it should not download them from Hugging Face.
 
+During the Docker build, look for a `PyTorch runtime ready` line. This confirms that the matching Torch, Torchvision, and Torchaudio wheels are installed and that the Qwen3-VL video processor can be imported. If an older worker reports `Qwen3VLVideoProcessor requires the Torchvision library`, rebuild and redeploy the worker image from the latest commit; the prepared model volume does not need to be downloaded again.
+
 ## Hardware warning
 
 This worker uses Diffusers automatic CPU offloading on one GPU. The open BF16 H3 checkpoint remains extremely large. The official MiniMax SGLang examples use four GPUs. If an 80 GB Serverless worker runs out of GPU or host memory, use a multi-GPU SGLang deployment or a separately validated quantized checkpoint; increasing cache storage alone will not solve an out-of-memory error.

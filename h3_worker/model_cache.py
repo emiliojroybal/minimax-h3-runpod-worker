@@ -4,6 +4,15 @@ from pathlib import Path
 
 
 RUNPOD_CACHED_MODEL_HUB = Path("/runpod-volume/huggingface-cache/hub")
+SHARED_COMPONENTS = (
+    "processor",
+    "tokenizer",
+    "text_encoder",
+    "vae",
+    "audio_vae",
+    "scheduler",
+    "audio_scheduler",
+)
 
 
 def repository_cache_name(model_id: str) -> str:
@@ -56,15 +65,10 @@ def resolve_model_snapshot(
     return None
 
 
-def missing_components(snapshot: Path, mode: str) -> list[str]:
-    shared = [
-        "processor",
-        "tokenizer",
-        "text_encoder",
-        "vae",
-        "audio_vae",
-        "scheduler",
-        "audio_scheduler",
-    ]
+def required_components(mode: str) -> list[str]:
     transformer = "transformer_ref" if mode == "ref2va" else "transformer"
-    return [name for name in [*shared, transformer] if not (snapshot / name).is_dir()]
+    return [*SHARED_COMPONENTS, transformer]
+
+
+def missing_components(snapshot: Path, mode: str) -> list[str]:
+    return [name for name in required_components(mode) if not (snapshot / name).is_dir()]

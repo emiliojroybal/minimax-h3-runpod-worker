@@ -12,6 +12,7 @@ from h3_worker.schemas import GenerationInput  # noqa: E402
 from h3_worker.model_cache import (  # noqa: E402
     missing_components,
     repository_cache_name,
+    required_components,
     resolve_model_snapshot,
     snapshot_from_hub_cache,
 )
@@ -35,6 +36,14 @@ def valid_payload() -> dict:
 
 
 class ContractTests(unittest.TestCase):
+    def test_production_image_includes_qwen_video_runtime(self) -> None:
+        dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+        self.assertRegex(
+            dockerfile,
+            r"torch==2\.11\.0\s+torchvision==0\.26\.0\s+torchaudio==2\.11\.0",
+        )
+        self.assertIn("Qwen3VLVideoProcessor", dockerfile)
+
     def test_valid_text_job(self) -> None:
         request = GenerationInput.model_validate(valid_payload())
         self.assertEqual(request.mode, "t2va")
@@ -100,6 +109,12 @@ class ContractTests(unittest.TestCase):
             self.assertEqual(missing_components(snapshot, "t2va"), [])
             self.assertEqual(missing_components(snapshot, "fl2va"), [])
             self.assertEqual(missing_components(snapshot, "ref2va"), ["transformer_ref"])
+
+    def test_required_components_selects_reference_transformer(self) -> None:
+        self.assertIn("transformer", required_components("t2va"))
+        self.assertNotIn("transformer_ref", required_components("t2va"))
+        self.assertIn("transformer_ref", required_components("ref2va"))
+        self.assertNotIn("transformer", required_components("ref2va"))
 
 
 if __name__ == "__main__":

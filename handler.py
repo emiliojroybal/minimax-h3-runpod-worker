@@ -13,17 +13,29 @@ from h3_worker import __version__
 from h3_worker.adapters import DiffusersH3Adapter, MockAdapter
 from h3_worker.config import settings
 from h3_worker.media import materialize_references
+from h3_worker.model_cache import missing_components, resolve_model_snapshot
 from h3_worker.schemas import ErrorBody, GenerationInput, GenerationResult
 from h3_worker.storage import store_output
 
 
 def capabilities() -> dict[str, Any]:
+    snapshot = resolve_model_snapshot(settings.model_id, settings.hub_cache, settings.model_path)
+    missing_by_mode = {
+        mode: missing_components(snapshot, mode) if snapshot is not None else ["snapshot"]
+        for mode in settings.allowed_modes
+    }
     return {
         "worker_version": __version__,
         "model": settings.model_id,
         "inference_mode": settings.inference_mode,
         "model_loaded": bool(DiffusersH3Adapter._pipelines),
-        "modes": ["t2va", "fl2va", "ref2va"],
+        "modes": list(settings.allowed_modes),
+        "model_cache": {
+            "required": settings.require_local_model,
+            "ready": all(not missing for missing in missing_by_mode.values()),
+            "snapshot": str(snapshot) if snapshot is not None else None,
+            "missing_by_mode": missing_by_mode,
+        },
         "durations": {"min": 5, "max": 15},
         "short_edges": [768],
         "fps": 24,
@@ -47,6 +59,19 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
         request = GenerationInput.model_validate(raw_input)
         if request.operation in {"health", "capabilities"}:
             return {"status": "ready", "capabilities": capabilities()}
+        if request.mode not in settings.allowed_modes:
+            return GenerationResult(
+                client_job_id=request.client_job_id,
+                status="failed",
+                mode=request.mode,
+                seed=request.seed,
+                elapsed_seconds=round(time.monotonic() - started, 3),
+                error=ErrorBody(
+                    code="MODE_NOT_ENABLED",
+                    message=f"Mode {request.mode} is not enabled on this endpoint.",
+                    details={"allowed_modes": list(settings.allowed_modes)},
+                ),
+            ).model_dump(mode="json", exclude_none=True)
 
         _progress(job, 5, "validated")
         adapter = MockAdapter() if settings.inference_mode == "mock" else DiffusersH3Adapter()
@@ -90,4 +115,9 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
 
 
 if __name__ == "__main__":
+    print(
+        f"[h3] worker starting; mode={settings.inference_mode}; allowed={','.join(settings.allowed_modes)}; "
+        f"hub_cache={settings.hub_cache}; require_local_model={settings.require_local_model}",
+        flush=True,
+    )
     runpod.serverless.start({"handler": handler})

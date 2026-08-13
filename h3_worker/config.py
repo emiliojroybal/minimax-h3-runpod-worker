@@ -12,11 +12,27 @@ def _truthy(name: str, default: bool = False) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _modes(name: str, default: str) -> tuple[str, ...]:
+    value = os.getenv(name, default)
+    modes = tuple(dict.fromkeys(item.strip().lower() for item in value.split(",") if item.strip()))
+    invalid = set(modes) - {"t2va", "fl2va", "ref2va"}
+    if not modes or invalid:
+        raise ValueError(f"{name} must contain t2va, fl2va, and/or ref2va; invalid: {sorted(invalid)}")
+    return modes
+
+
+_HF_HOME = Path(os.getenv("HF_HOME", "/runpod-volume/huggingface"))
+
+
 @dataclass(frozen=True)
 class Settings:
     inference_mode: str = os.getenv("H3_INFERENCE_MODE", "mock").strip().lower()
     model_id: str = os.getenv("H3_MODEL_ID", "MiniMaxAI/MiniMax-H3")
-    model_cache: Path = Path(os.getenv("HF_HOME", "/runpod-volume/huggingface"))
+    model_path: Path | None = Path(os.environ["H3_MODEL_PATH"]) if os.getenv("H3_MODEL_PATH") else None
+    hf_home: Path = _HF_HOME
+    hub_cache: Path = Path(os.getenv("HF_HUB_CACHE", str(_HF_HOME / "hub")))
+    require_local_model: bool = _truthy("H3_REQUIRE_LOCAL_MODEL")
+    allowed_modes: tuple[str, ...] = _modes("H3_ALLOWED_MODES", "t2va,fl2va,ref2va")
     output_dir: Path = Path(os.getenv("H3_OUTPUT_DIR", "/tmp/h3-outputs"))
     allow_http_references: bool = _truthy("ALLOW_HTTP_REFERENCES")
     max_download_bytes: int = int(os.getenv("MAX_REFERENCE_BYTES", str(300 * 1024 * 1024)))

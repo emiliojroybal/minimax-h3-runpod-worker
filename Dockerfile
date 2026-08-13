@@ -5,7 +5,10 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     H3_INFERENCE_MODE=diffusers \
-    HF_HOME=/runpod-volume/huggingface
+    H3_REQUIRE_LOCAL_MODEL=1 \
+    HF_HOME=/runpod-volume/huggingface \
+    HF_HUB_CACHE=/runpod-volume/huggingface/hub \
+    HF_XET_CACHE=/runpod-volume/huggingface/xet
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
       python3 python3-pip git ffmpeg ca-certificates \
@@ -19,7 +22,8 @@ RUN python3 -m pip install --upgrade pip setuptools wheel \
     && python3 -m pip check
 COPY h3_worker ./h3_worker
 COPY handler.py .
+COPY preload_h3.py .
 
-# Deliberately no model download here. H3 components are fetched by load_components()
-# only after a production request reaches a suitably provisioned GPU worker.
+# Deliberately no model download here. Production requires a selectively preloaded
+# network volume, preventing accidental 100+ GiB downloads during a request.
 CMD ["python3", "-u", "handler.py"]

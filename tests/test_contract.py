@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -8,6 +9,12 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from h3_worker.schemas import GenerationInput  # noqa: E402
+from h3_worker.model_cache import (  # noqa: E402
+    missing_components,
+    repository_cache_name,
+    resolve_model_snapshot,
+    snapshot_from_hub_cache,
+)
 from h3_worker.utils import aspect_dimensions, h3_num_frames, validate_total_durations  # noqa: E402
 from pydantic import ValidationError  # noqa: E402
 
@@ -68,6 +75,31 @@ class ContractTests(unittest.TestCase):
     def test_total_media_duration_is_limited(self) -> None:
         with self.assertRaisesRegex(ValueError, "must not exceed 15 seconds"):
             validate_total_durations([("audio", 8.0), ("audio", 8.0), ("video", 12.0)])
+
+    def test_model_cache_resolves_main_snapshot(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            hub = Path(temp)
+            model_root = hub / repository_cache_name("MiniMaxAI/MiniMax-H3")
+            snapshot = model_root / "snapshots" / "revision-1"
+            snapshot.mkdir(parents=True)
+            (snapshot / "modular_model_index.json").write_text("{}", encoding="utf-8")
+            (model_root / "refs").mkdir()
+            (model_root / "refs" / "main").write_text("revision-1", encoding="utf-8")
+            self.assertEqual(snapshot_from_hub_cache("MiniMaxAI/MiniMax-H3", hub), snapshot)
+            self.assertEqual(resolve_model_snapshot("MiniMaxAI/MiniMax-H3", hub), snapshot)
+
+    def test_model_cache_detects_workflow_specific_transformers(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            snapshot = Path(temp)
+            (snapshot / "modular_model_index.json").write_text("{}", encoding="utf-8")
+            for component in (
+                "processor", "tokenizer", "text_encoder", "vae", "audio_vae",
+                "scheduler", "audio_scheduler", "transformer",
+            ):
+                (snapshot / component).mkdir()
+            self.assertEqual(missing_components(snapshot, "t2va"), [])
+            self.assertEqual(missing_components(snapshot, "fl2va"), [])
+            self.assertEqual(missing_components(snapshot, "ref2va"), ["transformer_ref"])
 
 
 if __name__ == "__main__":

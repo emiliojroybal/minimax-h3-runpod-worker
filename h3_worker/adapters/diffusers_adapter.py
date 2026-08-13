@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import time
 from pathlib import Path
 from threading import Lock
 
 from .base import GenerationAdapter
 from ..config import settings
 from ..media import LocalReference
+from ..model_cache import missing_components, resolve_model_snapshot
 from ..schemas import GenerationInput
 from ..utils import aspect_dimensions, h3_num_frames
 
@@ -14,7 +16,21 @@ class DiffusersH3Adapter(GenerationAdapter):
     """Lazy official Modular Diffusers adapter. Importing this module never loads or downloads H3."""
 
     _pipelines: dict[str, object] = {}
+    _manager: object | None = None
     _lock = Lock()
+
+    @classmethod
+    def _components_manager(cls):
+        if cls._manager is None:
+            from diffusers import ComponentsManager
+
+            manager = ComponentsManager()
+            manager.enable_auto_cpu_offload(
+                device="cuda",
+                memory_reserve_margin="12GB",
+            )
+            cls._manager = manager
+        return cls._manager
 
     def _pipeline(self, mode: str):
         if mode in self._pipelines:
@@ -23,24 +39,47 @@ class DiffusersH3Adapter(GenerationAdapter):
             if mode in self._pipelines:
                 return self._pipelines[mode]
             import torch
-            from diffusers import ComponentsManager, ModularPipeline
+            from diffusers import ModularPipeline
 
-            settings.model_cache.mkdir(parents=True, exist_ok=True)
-            manager = ComponentsManager()
-            manager.enable_auto_cpu_offload(
-                device="cuda",
-                memory_reserve_margin="12GB",
-            )
-            pipeline = ModularPipeline.from_pretrained(
+            started = time.monotonic()
+            settings.hub_cache.mkdir(parents=True, exist_ok=True)
+            snapshot = resolve_model_snapshot(
                 settings.model_id,
-                workflow=mode,
-                components_manager=manager,
-                cache_dir=str(settings.model_cache),
+                settings.hub_cache,
+                settings.model_path,
             )
-            # This is the only call that may fetch model components, and it occurs only
-            # after a production inference request reaches a GPU worker.
+            if snapshot is not None:
+                missing = missing_components(snapshot, mode)
+                if missing:
+                    raise RuntimeError(
+                        f"The local H3 cache is incomplete for {mode}; missing: {', '.join(missing)}. "
+                        "Run preload_h3.py for this workflow before starting the endpoint."
+                    )
+                model_source = str(snapshot)
+                print(f"[h3] loading {mode} from local snapshot {snapshot}", flush=True)
+            else:
+                if settings.require_local_model:
+                    raise RuntimeError(
+                        "No preloaded MiniMax H3 snapshot was found. Attach the prepared RunPod network volume "
+                        f"and verify HF_HUB_CACHE={settings.hub_cache}. Runtime model downloads are disabled."
+                    )
+                model_source = settings.model_id
+                print(
+                    f"[h3] local snapshot not found; downloading {mode} into {settings.hub_cache}",
+                    flush=True,
+                )
+
+            pipeline = ModularPipeline.from_pretrained(
+                model_source,
+                workflow=mode,
+                components_manager=self._components_manager(),
+                collection="minimax-h3",
+                cache_dir=str(settings.hub_cache),
+            )
+            print(f"[h3] pipeline configuration ready for {mode}; loading components", flush=True)
             pipeline.load_components(dtype=torch.bfloat16)
             self._pipelines[mode] = pipeline
+            print(f"[h3] {mode} components ready in {time.monotonic() - started:.1f}s", flush=True)
             return pipeline
 
     def generate(self, request: GenerationInput, references: list[LocalReference], output_path: Path) -> float:

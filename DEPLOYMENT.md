@@ -59,6 +59,7 @@ Create or edit the Serverless endpoint:
 H3_INFERENCE_MODE=diffusers
 H3_MODEL_ID=MiniMaxAI/MiniMax-H3
 H3_REQUIRE_LOCAL_MODEL=true
+H3_ATTENTION_BACKEND=auto
 H3_ALLOWED_MODES=t2va,fl2va
 HF_HOME=/runpod-volume/huggingface
 HF_HUB_CACHE=/runpod-volume/huggingface/hub
@@ -104,6 +105,8 @@ Send this async request to each endpoint:
 The response should report `model_cache.ready: true` and list the endpoint's enabled modes. This health request does not load model weights into memory. The first actual generation will still take several minutes to load the pre-cached weights from the volume, but it should not download them from Hugging Face.
 
 During the Docker build, look for a `PyTorch runtime ready` line. This confirms that the matching Torch, Torchvision, and Torchaudio wheels are installed and that the Qwen3-VL video processor can be imported. If an older worker reports `Qwen3VLVideoProcessor requires the Torchvision library`, rebuild and redeploy the worker image from the latest commit; the prepared model volume does not need to be downloaded again.
+
+On an H100 or H200, the first generation should log `enabled attention backend _flash_3_hub`. The small precompiled kernel is fetched from Hugging Face and cached under `HF_HOME`; it is not part of the H3 model weights. If auto-selection cannot enable it, the worker logs a warning and falls back to the much slower full-attention path. During generation, a heartbeat is logged every 30 seconds even while a single transformer step is still running.
 
 ## Hardware warning
 

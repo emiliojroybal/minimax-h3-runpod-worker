@@ -32,6 +32,7 @@ class Settings:
     hf_home: Path = _HF_HOME
     hub_cache: Path = Path(os.getenv("HF_HUB_CACHE", str(_HF_HOME / "hub")))
     require_local_model: bool = _truthy("H3_REQUIRE_LOCAL_MODEL")
+    attention_backend: str = os.getenv("H3_ATTENTION_BACKEND", "auto").strip().lower()
     allowed_modes: tuple[str, ...] = _modes("H3_ALLOWED_MODES", "t2va,fl2va,ref2va")
     output_dir: Path = Path(os.getenv("H3_OUTPUT_DIR", "/tmp/h3-outputs"))
     allow_http_references: bool = _truthy("ALLOW_HTTP_REFERENCES")

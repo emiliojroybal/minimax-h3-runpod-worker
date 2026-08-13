@@ -37,7 +37,7 @@ def capabilities() -> dict[str, Any]:
             "missing_by_mode": missing_by_mode,
         },
         "durations": {"min": 5, "max": 15},
-        "short_edges": [768],
+        "short_edges": [544, 768],
         "fps": 24,
         "max_references": {"images": 9, "videos": 3, "audio": 3, "total": 12},
         "features": {"native_audio": True, "first_frame": True, "last_frame": True, "lora": False, "open_weights_2k": False},

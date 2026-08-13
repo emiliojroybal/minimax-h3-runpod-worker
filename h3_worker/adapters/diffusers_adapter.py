@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
-from threading import Lock
+from threading import Event, Lock, Thread
 
 from .base import GenerationAdapter
 from ..config import settings
@@ -16,6 +16,7 @@ class DiffusersH3Adapter(GenerationAdapter):
     """Lazy official Modular Diffusers adapter. Importing this module never loads or downloads H3."""
 
     _pipelines: dict[str, object] = {}
+    _attention_backends: dict[str, str] = {}
     _manager: object | None = None
     _lock = Lock()
 
@@ -31,6 +32,62 @@ class DiffusersH3Adapter(GenerationAdapter):
             )
             cls._manager = manager
         return cls._manager
+
+    @staticmethod
+    def _configure_attention(pipeline, mode: str, torch) -> str:
+        transformer_name = "transformer_ref" if mode == "ref2va" else "transformer"
+        transformer = getattr(pipeline, transformer_name)
+        configured = settings.attention_backend
+        if configured == "auto":
+            major, minor = torch.cuda.get_device_capability()
+            configured = "_flash_3_hub" if major == 9 else "default"
+            print(
+                f"[h3] GPU={torch.cuda.get_device_name()} compute_capability={major}.{minor}; "
+                f"attention_backend={configured}",
+                flush=True,
+            )
+        if configured in {"", "default", "sdpa"}:
+            print(
+                "[h3] using the default attention backend; full-attention H3 generation may be slow",
+                flush=True,
+            )
+            return "default"
+        try:
+            transformer.set_attention_backend(configured)
+        except Exception as error:
+            if settings.attention_backend != "auto":
+                raise RuntimeError(
+                    f"Unable to enable the requested H3 attention backend {configured}: {error}"
+                ) from error
+            print(
+                f"[h3] WARNING: unable to enable {configured}: {error}; falling back to default attention",
+                flush=True,
+            )
+            return "default"
+        print(f"[h3] enabled attention backend {configured}", flush=True)
+        return configured
+
+    @staticmethod
+    def _generate_with_heartbeat(pipeline, kwargs: dict[str, object], summary: str):
+        stopped = Event()
+        started = time.monotonic()
+
+        def report() -> None:
+            while not stopped.wait(30):
+                elapsed = time.monotonic() - started
+                print(
+                    f"[h3] generation still active after {elapsed:.0f}s ({summary}); "
+                    "the denoising progress bar advances after each full transformer step",
+                    flush=True,
+                )
+
+        heartbeat = Thread(target=report, name="h3-generation-heartbeat", daemon=True)
+        heartbeat.start()
+        try:
+            return pipeline(**kwargs)
+        finally:
+            stopped.set()
+            heartbeat.join(timeout=1)
 
     def _pipeline(self, mode: str):
         if mode in self._pipelines:
@@ -99,6 +156,7 @@ class DiffusersH3Adapter(GenerationAdapter):
                     "Check the component-load error immediately above; the worker image may be missing "
                     "a required runtime dependency."
                 )
+            self._attention_backends[mode] = self._configure_attention(pipeline, mode, torch)
             self._pipelines[mode] = pipeline
             print(f"[h3] {mode} components ready in {time.monotonic() - started:.1f}s", flush=True)
             return pipeline
@@ -144,7 +202,17 @@ class DiffusersH3Adapter(GenerationAdapter):
                     converted.append(MiniMaxH3AudioReference.from_file(str(item.path)))
             kwargs["references"] = converted
 
-        result = pipeline(**kwargs)
+        summary = (
+            f"mode={request.mode}, canvas={width}x{height}, frames={frames}, "
+            f"steps={request.inference_steps}, attention={self._attention_backends.get(request.mode, 'unknown')}"
+        )
+        print(f"[h3] generation compute starting ({summary})", flush=True)
+        generation_started = time.monotonic()
+        result = self._generate_with_heartbeat(pipeline, kwargs, summary)
+        print(
+            f"[h3] generation compute completed in {time.monotonic() - generation_started:.1f}s; encoding output",
+            flush=True,
+        )
         output_path.parent.mkdir(parents=True, exist_ok=True)
         encode_video(
             result["videos"][0],
@@ -153,4 +221,5 @@ class DiffusersH3Adapter(GenerationAdapter):
             audio=result["audio"][0],
             audio_sample_rate=result["sampling_rate"],
         )
+        print(f"[h3] output encoded at {output_path}", flush=True)
         return frames / request.target.fps

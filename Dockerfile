@@ -5,6 +5,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     H3_INFERENCE_MODE=diffusers \
+    H3_ATTENTION_BACKEND=auto \
     H3_REQUIRE_LOCAL_MODEL=1 \
     HF_HOME=/runpod-volume/huggingface \
     HF_HUB_CACHE=/runpod-volume/huggingface/hub \
@@ -21,7 +22,7 @@ RUN python3 -m pip install --upgrade pip setuptools wheel \
       torch==2.11.0 torchvision==0.26.0 torchaudio==2.11.0 \
     && python3 -m pip install -r requirements-production.txt \
     && python3 -m pip check \
-    && python3 -c "import torch, torchvision, torchaudio; from transformers.models.qwen3_vl.video_processing_qwen3_vl import Qwen3VLVideoProcessor; print(f'PyTorch runtime ready: torch={torch.__version__}, torchvision={torchvision.__version__}, torchaudio={torchaudio.__version__}')"
+    && python3 -c "import kernels, torch, torchvision, torchaudio; from transformers.models.qwen3_vl.video_processing_qwen3_vl import Qwen3VLVideoProcessor; print(f'PyTorch runtime ready: torch={torch.__version__}, torchvision={torchvision.__version__}, torchaudio={torchaudio.__version__}')"
 COPY h3_worker ./h3_worker
 COPY handler.py .
 COPY preload_h3.py .

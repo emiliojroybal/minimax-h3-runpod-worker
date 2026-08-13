@@ -36,6 +36,10 @@ def valid_payload() -> dict:
 
 
 class ContractTests(unittest.TestCase):
+    def test_worker_advertises_native_and_draft_canvases(self) -> None:
+        handler_source = (ROOT / "handler.py").read_text(encoding="utf-8")
+        self.assertIn('"short_edges": [544, 768]', handler_source)
+
     def test_production_image_includes_qwen_video_runtime(self) -> None:
         dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
         self.assertRegex(
@@ -43,6 +47,10 @@ class ContractTests(unittest.TestCase):
             r"torch==2\.11\.0\s+torchvision==0\.26\.0\s+torchaudio==2\.11\.0",
         )
         self.assertIn("Qwen3VLVideoProcessor", dockerfile)
+        requirements = (ROOT / "requirements-production.txt").read_text(encoding="utf-8")
+        self.assertIn("kernels==0.16.0", requirements)
+        adapter = (ROOT / "h3_worker" / "adapters" / "diffusers_adapter.py").read_text(encoding="utf-8")
+        self.assertIn('"_flash_3_hub"', adapter)
 
     def test_valid_text_job(self) -> None:
         request = GenerationInput.model_validate(valid_payload())
@@ -80,6 +88,9 @@ class ContractTests(unittest.TestCase):
             self.assertEqual(width % 32, 0)
             self.assertEqual(height % 32, 0)
             self.assertEqual(min(width, height), 768)
+
+        width, height = aspect_dimensions("16:9", short_edge=544)
+        self.assertEqual((width, height), (960, 544))
 
     def test_total_media_duration_is_limited(self) -> None:
         with self.assertRaisesRegex(ValueError, "must not exceed 15 seconds"):

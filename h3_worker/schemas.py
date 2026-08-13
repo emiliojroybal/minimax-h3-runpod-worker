@@ -20,10 +20,25 @@ class ReferenceInput(BaseModel):
 class GenerationTarget(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    short_edge: Literal[768] = 768
+    short_edge: Literal[544, 768] = 768
     aspect_ratio: Literal["21:9", "16:9", "4:3", "1:1", "3:4", "9:16", "auto"] = "16:9"
     duration_seconds: int = Field(default=8, ge=5, le=15)
     fps: Literal[24] = 24
+
+
+class LoraInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(min_length=1, max_length=160)
+    name: str = Field(min_length=1, max_length=200)
+    url: AnyHttpUrl
+    weight: float = Field(default=1.0, ge=0, le=2)
+    alpha: int = Field(default=8, ge=1, le=1024)
+    video_shift: float = Field(default=12.0, gt=0, le=100)
+    audio_shift: float = Field(default=3.0, gt=0, le=100)
+    compatible_mode: Literal["base", "ref2va"] = "base"
+    short_edge: Literal[544, 768] = 544
+    recommended_steps: int = Field(ge=1, le=80)
 
 
 class GenerationInput(BaseModel):
@@ -36,6 +51,7 @@ class GenerationInput(BaseModel):
     resolved_prompt: str = Field(default="health", min_length=1, max_length=24_000)
     mode: Literal["t2va", "fl2va", "ref2va"] = "t2va"
     references: list[ReferenceInput] = Field(default_factory=list, max_length=12)
+    loras: list[LoraInput] = Field(default_factory=list, max_length=1)
     target: GenerationTarget = Field(default_factory=GenerationTarget)
     seed: int = Field(default=0, ge=0, le=9_223_372_036_854_775_807)
     inference_steps: int = Field(default=30, ge=2, le=80)
@@ -65,6 +81,19 @@ class GenerationInput(BaseModel):
             raise ValueError(f"Mode {self.mode} does not match the supplied references; expected {expected_mode}.")
         if keyframes and omni:
             raise ValueError("Keyframes and omni-references use different H3 checkpoints and cannot be mixed.")
+        if self.loras:
+            lora = self.loras[0]
+            expected_lora_mode = "ref2va" if self.mode == "ref2va" else "base"
+            if lora.compatible_mode != expected_lora_mode:
+                raise ValueError(f"The selected LoRA is for {lora.compatible_mode}, not {self.mode}.")
+            if lora.short_edge != self.target.short_edge:
+                raise ValueError(
+                    f"The selected LoRA requires a {lora.short_edge}px short edge, not {self.target.short_edge}px."
+                )
+            if lora.recommended_steps != self.inference_steps:
+                raise ValueError(
+                    f"The selected LoRA requires {lora.recommended_steps} inference steps, not {self.inference_steps}."
+                )
         return self
 
 

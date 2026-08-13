@@ -106,7 +106,17 @@ The response should report `model_cache.ready: true` and list the endpoint's ena
 
 During the Docker build, look for a `PyTorch runtime ready` line. This confirms that the matching Torch, Torchvision, and Torchaudio wheels are installed and that the Qwen3-VL video processor can be imported. If an older worker reports `Qwen3VLVideoProcessor requires the Torchvision library`, rebuild and redeploy the worker image from the latest commit; the prepared model volume does not need to be downloaded again.
 
-On an H100 or H200, the first generation should log `enabled attention backend _flash_3_hub`. The small precompiled kernel is fetched from Hugging Face and cached under `HF_HOME`; it is not part of the H3 model weights. If auto-selection cannot enable it, the worker logs a warning and falls back to the much slower full-attention path. During generation, a heartbeat is logged every 30 seconds even while a single transformer step is still running.
+On an H100 or H200, the first generation should log `enabled attention backend _flash_3_hub`. On a Blackwell GPU such as an RTX PRO 6000, it should log `enabled attention backend flash_4_hub`. The small precompiled kernel is fetched from Hugging Face and cached under `HF_HOME`; it is not part of the H3 model weights. If auto-selection cannot enable it, the worker logs a warning and falls back to the much slower full-attention path. During generation, a heartbeat is logged every 30 seconds even while a single transformer step is still running.
+
+## Linked Turbo LoRAs
+
+The Studio accepts the supported Diffusers `.safetensors` links from `lightx2v/Minimax-h3-Turbo`. On first use, the worker downloads the selected checkpoint directly into `HF_HUB_CACHE`; subsequent workers attached to the same network volume reuse it. This does not download the base H3 model and does not place the LoRA on the local Studio computer.
+
+The Studio automatically applies the checkpoint's published resolution, inference steps, LoRA alpha, and scheduler shifts. The 768p four-step checkpoint uses a video shift of 6 and alpha 128; the 544p four/eight-step checkpoints use their published 12/3 video/audio shifts.
+
+## Generated video location
+
+With all `OBJECT_STORAGE_*` variables configured, results are written to `outputs/<studio-job-id>.mp4` in that bucket and the response contains a temporary download URL. With no object storage configuration, the fallback is `/runpod-volume/outputs/<studio-job-id>.mp4`. The latter persists on the attached volume but is not directly downloadable through the Studio. The intermediate file under `/tmp/h3-job-*` is always temporary.
 
 ## Hardware warning
 

@@ -16,6 +16,7 @@ from h3_worker.model_cache import (  # noqa: E402
     resolve_model_snapshot,
     snapshot_from_hub_cache,
 )
+from h3_worker.lora import parse_hugging_face_lora_url  # noqa: E402
 from h3_worker.utils import aspect_dimensions, h3_num_frames, validate_total_durations  # noqa: E402
 from pydantic import ValidationError  # noqa: E402
 
@@ -51,6 +52,47 @@ class ContractTests(unittest.TestCase):
         self.assertIn("kernels==0.16.0", requirements)
         adapter = (ROOT / "h3_worker" / "adapters" / "diffusers_adapter.py").read_text(encoding="utf-8")
         self.assertIn('"_flash_3_hub"', adapter)
+        self.assertIn('"flash_4_hub"', adapter)
+        self.assertIn('request.inference_steps + 1', adapter)
+        self.assertIn('with torch.inference_mode()', adapter)
+
+    def test_turbo_lora_contract(self) -> None:
+        payload = valid_payload()
+        payload["target"]["short_edge"] = 544
+        payload["inference_steps"] = 4
+        payload["loras"] = [{
+            "id": "turbo", "name": "Turbo 4-step",
+            "url": "https://huggingface.co/lightx2v/Minimax-h3-Turbo/resolve/main/minimax_h3_fl2v_turbo_4step_v0.1.safetensors",
+            "weight": 1.0, "alpha": 8, "video_shift": 12, "audio_shift": 3,
+            "compatible_mode": "base", "short_edge": 544, "recommended_steps": 4,
+        }]
+        request = GenerationInput.model_validate(payload)
+        self.assertEqual(request.loras[0].recommended_steps, 4)
+
+    def test_turbo_lora_rejects_wrong_resolution(self) -> None:
+        payload = valid_payload()
+        payload["inference_steps"] = 4
+        payload["loras"] = [{
+            "id": "turbo", "name": "Turbo 4-step",
+            "url": "https://huggingface.co/lightx2v/Minimax-h3-Turbo/resolve/main/minimax_h3_fl2v_turbo_4step_v0.1.safetensors",
+            "weight": 1.0, "alpha": 8, "video_shift": 12, "audio_shift": 3,
+            "compatible_mode": "base", "short_edge": 544, "recommended_steps": 4,
+        }]
+        with self.assertRaises(ValidationError):
+            GenerationInput.model_validate(payload)
+
+    def test_linked_lora_is_restricted_to_supported_hugging_face_files(self) -> None:
+        repo, revision, filename = parse_hugging_face_lora_url(
+            "https://huggingface.co/lightx2v/Minimax-h3-Turbo/blob/main/"
+            "minimax_h3_fl2v_turbo_4step_v1.0_768p_bf16.safetensors"
+        )
+        self.assertEqual(repo, "lightx2v/Minimax-h3-Turbo")
+        self.assertEqual(revision, "main")
+        self.assertTrue(filename.endswith(".safetensors"))
+        with self.assertRaises(ValueError):
+            parse_hugging_face_lora_url(
+                "https://example.com/lightx2v/Minimax-h3-Turbo/blob/main/adapter.safetensors"
+            )
 
     def test_valid_text_job(self) -> None:
         request = GenerationInput.model_validate(valid_payload())
@@ -91,6 +133,7 @@ class ContractTests(unittest.TestCase):
 
         width, height = aspect_dimensions("16:9", short_edge=544)
         self.assertEqual((width, height), (960, 544))
+        self.assertEqual(aspect_dimensions("16:9", short_edge=768), (1344, 768))
 
     def test_total_media_duration_is_limited(self) -> None:
         with self.assertRaisesRegex(ValueError, "must not exceed 15 seconds"):

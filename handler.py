@@ -40,7 +40,7 @@ def capabilities() -> dict[str, Any]:
         "short_edges": [544, 768],
         "fps": 24,
         "max_references": {"images": 9, "videos": 3, "audio": 3, "total": 12},
-        "features": {"native_audio": True, "first_frame": True, "last_frame": True, "lora": False, "open_weights_2k": False},
+        "features": {"native_audio": True, "first_frame": True, "last_frame": True, "lora": True, "open_weights_2k": False},
     }
 
 

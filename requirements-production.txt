@@ -2,8 +2,9 @@
 accelerate==1.14.0
 huggingface-hub==1.27.0
 safetensors==0.8.0
+peft==0.18.1
 transformers==5.15.0
-# Downloads the official precompiled Flash Attention 3 kernel selected on Hopper GPUs.
+# Downloads the official precompiled Flash Attention 3/4 kernel selected on Hopper/Blackwell GPUs.
 kernels==0.16.0
 # torchao 0.17.0 is explicitly compatible with PyTorch 2.11.0.
 torchao==0.17.0

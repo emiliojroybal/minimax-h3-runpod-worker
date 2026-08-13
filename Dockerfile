@@ -22,7 +22,7 @@ RUN python3 -m pip install --upgrade pip setuptools wheel \
       torch==2.11.0 torchvision==0.26.0 torchaudio==2.11.0 \
     && python3 -m pip install -r requirements-production.txt \
     && python3 -m pip check \
-    && python3 -c "import kernels, torch, torchvision, torchaudio; from transformers.models.qwen3_vl.video_processing_qwen3_vl import Qwen3VLVideoProcessor; print(f'PyTorch runtime ready: torch={torch.__version__}, torchvision={torchvision.__version__}, torchaudio={torchaudio.__version__}')"
+    && python3 -c "import kernels, peft, torch, torchvision, torchaudio; from transformers.models.qwen3_vl.video_processing_qwen3_vl import Qwen3VLVideoProcessor; print(f'PyTorch runtime ready: torch={torch.__version__}, torchvision={torchvision.__version__}, torchaudio={torchaudio.__version__}')"
 COPY h3_worker ./h3_worker
 COPY handler.py .
 COPY preload_h3.py .

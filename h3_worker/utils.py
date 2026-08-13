@@ -22,6 +22,12 @@ def aspect_dimensions(aspect_ratio: str, short_edge: int = 768) -> tuple[int, in
         "21:9": (21, 9), "16:9": (16, 9), "4:3": (4, 3), "1:1": (1, 1),
         "3:4": (3, 4), "9:16": (9, 16), "auto": (16, 9),
     }
+    # H3's native landscape checkpoint is trained at 1344x768 (and its
+    # transposed portrait canvas), despite the label being conventionally 16:9.
+    if short_edge == 768 and aspect_ratio in {"16:9", "auto"}:
+        return 1344, 768
+    if short_edge == 768 and aspect_ratio == "9:16":
+        return 768, 1344
     rw, rh = ratios[aspect_ratio]
     if rw >= rh:
         height = short_edge

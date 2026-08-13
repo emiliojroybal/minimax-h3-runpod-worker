@@ -7,6 +7,7 @@ from threading import Event, Lock, Thread
 from .base import GenerationAdapter
 from ..config import settings
 from ..media import LocalReference
+from ..lora import download_hugging_face_lora, load_lora_adapter
 from ..model_cache import missing_components, required_components, resolve_model_snapshot
 from ..schemas import GenerationInput
 from ..utils import aspect_dimensions, h3_num_frames
@@ -17,6 +18,7 @@ class DiffusersH3Adapter(GenerationAdapter):
 
     _pipelines: dict[str, object] = {}
     _attention_backends: dict[str, str] = {}
+    _loaded_loras: dict[str, str] = {}
     _manager: object | None = None
     _lock = Lock()
 
@@ -40,7 +42,12 @@ class DiffusersH3Adapter(GenerationAdapter):
         configured = settings.attention_backend
         if configured == "auto":
             major, minor = torch.cuda.get_device_capability()
-            configured = "_flash_3_hub" if major == 9 else "default"
+            if major >= 10:
+                configured = "flash_4_hub"
+            elif major == 9:
+                configured = "_flash_3_hub"
+            else:
+                configured = "default"
             print(
                 f"[h3] GPU={torch.cuda.get_device_name()} compute_capability={major}.{minor}; "
                 f"attention_backend={configured}",
@@ -157,9 +164,42 @@ class DiffusersH3Adapter(GenerationAdapter):
                     "a required runtime dependency."
                 )
             self._attention_backends[mode] = self._configure_attention(pipeline, mode, torch)
+            transformer_name = "transformer_ref" if mode == "ref2va" else "transformer"
+            active_transformer = getattr(pipeline, transformer_name)
+            active_transformer.requires_grad_(False)
+            active_transformer.eval()
             self._pipelines[mode] = pipeline
             print(f"[h3] {mode} components ready in {time.monotonic() - started:.1f}s", flush=True)
             return pipeline
+
+    @classmethod
+    def _configure_lora(cls, pipeline, request: GenerationInput) -> str:
+        transformer_name = "transformer_ref" if request.mode == "ref2va" else "transformer"
+        transformer = getattr(pipeline, transformer_name)
+        selected = request.loras[0] if request.loras else None
+        current = cls._loaded_loras.get(request.mode)
+        if selected is None:
+            if current:
+                transformer.disable_lora()
+            pipeline.scheduler.set_shift(12.0)
+            pipeline.audio_scheduler.set_shift(3.0)
+            return "none"
+
+        signature = f"{selected.url}|{selected.alpha}"
+        if current and current != signature:
+            transformer.delete_adapters("default")
+            cls._loaded_loras.pop(request.mode, None)
+        if cls._loaded_loras.get(request.mode) != signature:
+            print(f"[h3] caching linked LoRA {selected.url}", flush=True)
+            lora_path = download_hugging_face_lora(str(selected.url), settings.hub_cache)
+            load_lora_adapter(transformer, lora_path, selected.alpha, selected.weight)
+            cls._loaded_loras[request.mode] = signature
+        else:
+            transformer.enable_lora()
+            transformer.set_adapters("default", weights=selected.weight)
+        pipeline.scheduler.set_shift(selected.video_shift)
+        pipeline.audio_scheduler.set_shift(selected.audio_shift)
+        return selected.name
 
     def generate(self, request: GenerationInput, references: list[LocalReference], output_path: Path) -> float:
         import torch
@@ -172,6 +212,7 @@ class DiffusersH3Adapter(GenerationAdapter):
         from diffusers.utils.export_utils import encode_video
 
         pipeline = self._pipeline(request.mode)
+        active_lora = self._configure_lora(pipeline, request)
         frames = h3_num_frames(request.target.duration_seconds, request.target.fps)
         width, height = aspect_dimensions(request.target.aspect_ratio, request.target.short_edge)
         kwargs: dict[str, object] = {
@@ -179,8 +220,11 @@ class DiffusersH3Adapter(GenerationAdapter):
             "num_frames": frames,
             "height": height,
             "width": width,
-            "num_inference_steps": request.inference_steps,
+            # MiniMaxH3Scheduler counts sigma grid points including terminal zero.
+            # N transformer evaluations therefore require N + 1 grid points.
+            "num_inference_steps": request.inference_steps + 1,
             "generator": torch.Generator(device="cpu").manual_seed(request.seed),
+            "output_type": "np",
             "output": ["videos", "audio", "sampling_rate"],
         }
 
@@ -204,21 +248,27 @@ class DiffusersH3Adapter(GenerationAdapter):
 
         summary = (
             f"mode={request.mode}, canvas={width}x{height}, frames={frames}, "
-            f"steps={request.inference_steps}, attention={self._attention_backends.get(request.mode, 'unknown')}"
+            f"steps={request.inference_steps}, attention={self._attention_backends.get(request.mode, 'unknown')}, "
+            f"lora={active_lora}"
         )
         print(f"[h3] generation compute starting ({summary})", flush=True)
         generation_started = time.monotonic()
-        result = self._generate_with_heartbeat(pipeline, kwargs, summary)
+        with torch.inference_mode():
+            result = self._generate_with_heartbeat(pipeline, kwargs, summary)
         print(
             f"[h3] generation compute completed in {time.monotonic() - generation_started:.1f}s; encoding output",
             flush=True,
         )
         output_path.parent.mkdir(parents=True, exist_ok=True)
+        audio = result["audio"][0]
+        if not isinstance(audio, torch.Tensor):
+            audio = torch.as_tensor(audio)
+        audio = audio.detach()
         encode_video(
             result["videos"][0],
             fps=request.target.fps,
             output_path=str(output_path),
-            audio=result["audio"][0],
+            audio=audio,
             audio_sample_rate=result["sampling_rate"],
         )
         print(f"[h3] output encoded at {output_path}", flush=True)

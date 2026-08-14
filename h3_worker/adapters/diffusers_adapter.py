@@ -3,6 +3,7 @@ from __future__ import annotations
 import time
 from pathlib import Path
 from threading import Event, Lock, Thread
+from typing import Callable
 
 from .base import GenerationAdapter
 from ..config import settings
@@ -75,7 +76,12 @@ class DiffusersH3Adapter(GenerationAdapter):
         return configured
 
     @staticmethod
-    def _generate_with_heartbeat(pipeline, kwargs: dict[str, object], summary: str):
+    def _generate_with_heartbeat(
+        pipeline,
+        kwargs: dict[str, object],
+        summary: str,
+        progress: Callable[[int, str], None] | None = None,
+    ):
         stopped = Event()
         started = time.monotonic()
 
@@ -87,6 +93,8 @@ class DiffusersH3Adapter(GenerationAdapter):
                     "the denoising progress bar advances after each full transformer step",
                     flush=True,
                 )
+                if progress:
+                    progress(min(84, 30 + int(elapsed / 30) * 2), "generating")
 
         heartbeat = Thread(target=report, name="h3-generation-heartbeat", daemon=True)
         heartbeat.start()
@@ -201,7 +209,13 @@ class DiffusersH3Adapter(GenerationAdapter):
         pipeline.audio_scheduler.set_shift(selected.audio_shift)
         return selected.name
 
-    def generate(self, request: GenerationInput, references: list[LocalReference], output_path: Path) -> float:
+    def generate(
+        self,
+        request: GenerationInput,
+        references: list[LocalReference],
+        output_path: Path,
+        progress: Callable[[int, str], None] | None = None,
+    ) -> float:
         import torch
         from PIL import Image
         from diffusers.modular_pipelines.minimax_h3 import (
@@ -212,6 +226,8 @@ class DiffusersH3Adapter(GenerationAdapter):
         from diffusers.utils.export_utils import encode_video
 
         pipeline = self._pipeline(request.mode)
+        if progress:
+            progress(28, "pipeline_ready")
         active_lora = self._configure_lora(pipeline, request)
         frames = h3_num_frames(request.target.duration_seconds, request.target.fps)
         width, height = aspect_dimensions(request.target.aspect_ratio, request.target.short_edge)
@@ -252,14 +268,18 @@ class DiffusersH3Adapter(GenerationAdapter):
             f"lora={active_lora}"
         )
         print(f"[h3] generation compute starting ({summary})", flush=True)
+        if progress:
+            progress(30, "generating")
         generation_started = time.monotonic()
         with torch.inference_mode():
-            result = self._generate_with_heartbeat(pipeline, kwargs, summary)
+            result = self._generate_with_heartbeat(pipeline, kwargs, summary, progress)
         print(
             f"[h3] generation compute completed in {time.monotonic() - generation_started:.1f}s; encoding output",
             flush=True,
         )
         output_path.parent.mkdir(parents=True, exist_ok=True)
+        if progress:
+            progress(87, "encoding_video")
         audio = result["audio"][0]
         if not isinstance(audio, torch.Tensor):
             audio = torch.as_tensor(audio)
@@ -272,4 +292,6 @@ class DiffusersH3Adapter(GenerationAdapter):
             audio_sample_rate=result["sampling_rate"],
         )
         print(f"[h3] output encoded at {output_path}", flush=True)
+        if progress:
+            progress(91, "video_encoded")
         return frames / request.target.fps

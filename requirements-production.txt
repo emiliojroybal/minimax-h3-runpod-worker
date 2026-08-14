@@ -6,6 +6,8 @@ peft==0.18.1
 transformers==5.15.0
 # Downloads the official precompiled Flash Attention 3/4 kernel selected on Hopper/Blackwell GPUs.
 kernels==0.16.0
+# Required by the official Flash Attention 4 hub kernel at runtime.
+einops==0.8.1
 # torchao 0.17.0 is explicitly compatible with PyTorch 2.11.0.
 torchao==0.17.0
 # Exact official-main revision containing the H3 ModularPipeline integration.

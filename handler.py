@@ -81,21 +81,22 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
             _progress(job, 18, "references_ready")
             output_path = workdir / "output.mp4"
             _progress(job, 25, "loading_pipeline" if settings.inference_mode != "mock" else "mock_render")
-            duration = adapter.generate(request, local_references, output_path)
+            duration = adapter.generate(request, local_references, output_path, lambda percent, stage: _progress(job, percent, stage))
             _progress(job, 92, "uploading_output")
-            stored = store_output(output_path, request.client_job_id)
+            stored = store_output(output_path, request.client_job_id, request.output_handoff)
         result = GenerationResult(
             client_job_id=request.client_job_id,
             status="completed",
             mode=request.mode,
             seed=request.seed,
             output_url=stored.output_url,
-            output_path=stored.output_path,
+            output_key=stored.output_key,
             storage=stored.storage,
             duration_seconds=duration,
             elapsed_seconds=round(time.monotonic() - started, 3),
         )
         _progress(job, 100, "completed")
+        print(f"[h3] job {request.client_job_id} completed; returning a small output receipt", flush=True)
         return result.model_dump(mode="json", exclude_none=True)
     except ValidationError as exc:
         return GenerationResult(

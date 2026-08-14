@@ -99,6 +99,19 @@ class ContractTests(unittest.TestCase):
         self.assertEqual(request.mode, "t2va")
         self.assertEqual(request.target.fps, 24)
 
+    def test_studio_output_handoff_contract(self) -> None:
+        payload = valid_payload()
+        payload["output_handoff"] = {
+            "object_key": "studio-handoff/job_test.mp4",
+            "upload_url": "https://example.com/signed-upload",
+            "content_type": "video/mp4",
+        }
+        request = GenerationInput.model_validate(payload)
+        self.assertEqual(request.output_handoff.object_key, "studio-handoff/job_test.mp4")
+        payload["output_handoff"]["object_key"] = "../../unexpected.mp4"
+        with self.assertRaises(ValidationError):
+            GenerationInput.model_validate(payload)
+
     def test_mode_must_match_keyframe(self) -> None:
         payload = valid_payload()
         payload["references"] = [{

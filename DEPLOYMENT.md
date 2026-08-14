@@ -64,10 +64,10 @@ H3_ALLOWED_MODES=t2va,fl2va
 HF_HOME=/runpod-volume/huggingface
 HF_HUB_CACHE=/runpod-volume/huggingface/hub
 HF_XET_CACHE=/runpod-volume/huggingface/xet
-H3_OUTPUT_DIR=/runpod-volume/outputs
+H3_OUTPUT_DIR=/tmp/h3-outputs
 ```
 
-Also configure the `OBJECT_STORAGE_*` values from `.env.example` for reference inputs and downloadable output.
+The Studio sends signed reference URLs and a signed output-upload URL with every job, so storage credentials do not need to be added to the worker endpoint.
 
 ## 4. Configure the Ref2VA endpoint
 
@@ -106,7 +106,7 @@ The response should report `model_cache.ready: true` and list the endpoint's ena
 
 During the Docker build, look for a `PyTorch runtime ready` line. This confirms that the matching Torch, Torchvision, and Torchaudio wheels are installed and that the Qwen3-VL video processor can be imported. If an older worker reports `Qwen3VLVideoProcessor requires the Torchvision library`, rebuild and redeploy the worker image from the latest commit; the prepared model volume does not need to be downloaded again.
 
-On an H100 or H200, the first generation should log `enabled attention backend _flash_3_hub`. On a Blackwell GPU such as an RTX PRO 6000, it should log `enabled attention backend flash_4_hub`. The small precompiled kernel is fetched from Hugging Face and cached under `HF_HOME`; it is not part of the H3 model weights. If auto-selection cannot enable it, the worker logs a warning and falls back to the much slower full-attention path. During generation, a heartbeat is logged every 30 seconds even while a single transformer step is still running.
+On an H100 or H200, the first generation should log `enabled attention backend _flash_3_hub`. On a Blackwell GPU such as an RTX PRO 6000, it should log `enabled attention backend flash_4_hub`. The image includes the kernel's required `einops` dependency. The small precompiled kernel is fetched from Hugging Face and cached under `HF_HOME`; it is not part of the H3 model weights. If auto-selection cannot enable it, the worker logs a warning and falls back to the much slower full-attention path. During generation, a heartbeat and a RunPod progress update are emitted every 30 seconds even while a single transformer step is still running.
 
 ## Linked Turbo LoRAs
 
@@ -116,7 +116,7 @@ The Studio automatically applies the checkpoint's published resolution, inferenc
 
 ## Generated video location
 
-With all `OBJECT_STORAGE_*` variables configured, results are written to `outputs/<studio-job-id>.mp4` in that bucket and the response contains a temporary download URL. With no object storage configuration, the fallback is `/runpod-volume/outputs/<studio-job-id>.mp4`. The latter persists on the attached volume but is not directly downloadable through the Studio. The intermediate file under `/tmp/h3-job-*` is always temporary.
+The worker encodes under `/tmp/h3-job-*`, uploads the MP4 to the signed `studio-handoff/<studio-job-id>.mp4` key, and returns only a small receipt to RunPod. The local Studio automatically downloads the file to `.data/media/generated/<studio-job-id>.mp4`, verifies that the transfer is complete, and deletes the handoff object. With Docker, the final file lives in the `studio_state` volume—not in the RunPod network volume. If a job remains marked **in use** after the log says it returned the small receipt, check the endpoint's idle-timeout and minimum-worker settings; keeping an initialized worker warm is separate from a job remaining active.
 
 ## Hardware warning
 

@@ -41,6 +41,14 @@ class LoraInput(BaseModel):
     recommended_steps: int = Field(ge=1, le=80)
 
 
+class OutputHandoff(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    object_key: str = Field(pattern=r"^studio-handoff/[A-Za-z0-9_-]+\.mp4$", max_length=240)
+    upload_url: AnyHttpUrl
+    content_type: Literal["video/mp4"] = "video/mp4"
+
+
 class GenerationInput(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
@@ -56,6 +64,7 @@ class GenerationInput(BaseModel):
     seed: int = Field(default=0, ge=0, le=9_223_372_036_854_775_807)
     inference_steps: int = Field(default=30, ge=2, le=80)
     generate_audio: Literal[True] = True
+    output_handoff: OutputHandoff | None = None
 
     @model_validator(mode="after")
     def validate_reference_contract(self) -> "GenerationInput":
@@ -110,7 +119,7 @@ class GenerationResult(BaseModel):
     mode: str
     seed: int
     output_url: str | None = None
-    output_path: str | None = None
+    output_key: str | None = None
     storage: str | None = None
     duration_seconds: float | None = None
     elapsed_seconds: float
